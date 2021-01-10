@@ -5,7 +5,7 @@ import org.springframework.stereotype.Component;
 
 @ConfigurationProperties(prefix = "spring.kafka", ignoreUnknownFields = false)
 @Component
-public class KafkaProperties {
+public class KafkaConsumerProperties {
 
     private String bootstrapServers;
 
