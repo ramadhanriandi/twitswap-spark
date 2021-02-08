@@ -84,29 +84,30 @@ public class SparkService {
             ConsumerStrategies.Subscribe(topics, kafkaConsumerConfig.consumerConfigs()));
 
     // Get the lines, split them into words, count the words and print
-    JavaDStream<String> lines = messages.map(stringStringConsumerRecord -> stringStringConsumerRecord.value());
+    JavaDStream<String> lines = messages.map(ConsumerRecord::value);
+
     //Count the tweets and print
     lines.count()
             .map(cnt -> "Popular hash tags in last 60 seconds (" + cnt + " total tweets):")
             .print();
 
-    this.kafkaProducer.send(new ProducerRecord<>(KafkaProducerConfig.TOPIC, null, "-"));
-
-    lines.flatMap(text -> HashTagsUtils.hashTagsFromTweet(text))
+    lines.flatMap(HashTagsUtils::hashTagsFromTweet)
             .mapToPair(hashTag -> new Tuple2<>(hashTag, 1))
-            .reduceByKey((a, b) -> Integer.sum(a, b))
-            .mapToPair(stringIntegerTuple2 -> stringIntegerTuple2.swap())
+            .reduceByKey(Integer::sum)
+            .mapToPair(Tuple2::swap)
             .foreachRDD(rrdd -> {
               log.info("---------------------------------------------------------------");
-              //Counts
+
+              final String[] popularHashtagsString = {""};
+
               rrdd.sortByKey(false).collect()
                       .forEach(record -> {
-                        String msg = String.format("%s|%d", record._2, record._1);
-
-                        this.kafkaProducer.send(new ProducerRecord<>(KafkaProducerConfig.TOPIC, null, msg));
-
-                        log.info(msg);
+                        String hashtagString = String.format("%s|%d\n", record._2, record._1);
+                        popularHashtagsString[0] = popularHashtagsString[0].concat(hashtagString);
+                        log.info(hashtagString);
                       });
+
+              this.kafkaProducer.send(new ProducerRecord<>(KafkaProducerConfig.TOPIC, null, popularHashtagsString[0]));
             });
 
     // Start the computation
