@@ -22,42 +22,27 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import scala.Tuple2;
 
-import java.util.Collection;
-import java.util.Collections;
-
 @Service
-public class PopularHashtagJob {
+public class PopularHashtagJob extends SparkJob {
   private final Logger log = LoggerFactory.getLogger(SparkService.class);
 
-  private final SparkConf sparkConf;
-
-  private final KafkaConsumerConfig kafkaConsumerConfig;
-
-  private final KafkaConsumerProperties kafkaConsumerProperties;
-
-  private final Collection<String> topics;
-
-  private KafkaProducer<String, String> kafkaProducer;
-
   public PopularHashtagJob(SparkConf sparkConf, KafkaConsumerConfig kafkaConsumerConfig, KafkaConsumerProperties kafkaConsumerProperties) {
-    this.sparkConf = sparkConf;
-    this.kafkaConsumerConfig = kafkaConsumerConfig;
-    this.kafkaConsumerProperties = kafkaConsumerProperties;
-    this.topics = Collections.singletonList(kafkaConsumerProperties.getTemplate().getDefaultTopic());
+    super(sparkConf, kafkaConsumerConfig, kafkaConsumerProperties);
   }
 
+  @Override
   public void run() {
     // Create kafka producer
-    this.kafkaProducer = KafkaProducerUtils.createKafkaProducer();
+    KafkaProducer<String, String> kafkaProducer = KafkaProducerUtils.createKafkaProducer();
 
     // Create context with a 10 seconds batch interval
-    JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, Durations.seconds(10));
+    JavaStreamingContext jssc = new JavaStreamingContext(getSparkConf(), Durations.seconds(10));
 
     // Create direct kafka stream with brokers and topics
     JavaInputDStream<ConsumerRecord<String, String>> messages = KafkaUtils.createDirectStream(
             jssc,
             LocationStrategies.PreferConsistent(),
-            ConsumerStrategies.Subscribe(topics, kafkaConsumerConfig.consumerConfigs()));
+            ConsumerStrategies.Subscribe(getTopics(), getKafkaConsumerConfig().consumerConfigs()));
 
     // Get the lines, split them into words, count the words and print
     JavaDStream<String> tweets = messages.map(ConsumerRecord::value);
@@ -73,8 +58,6 @@ public class PopularHashtagJob {
             .reduceByKey(Integer::sum)
             .mapToPair(Tuple2::swap)
             .foreachRDD(rrdd -> {
-              log.info("---------------------------------------------------------------");
-
               final String[] popularHashtagsString = {""};
 
               rrdd.sortByKey(false).collect()
@@ -84,7 +67,7 @@ public class PopularHashtagJob {
                         log.info(hashtagString);
                       });
 
-              this.kafkaProducer.send(new ProducerRecord<>(KafkaProducerConfig.POPULAR_HASHTAG_TOPIC, null, popularHashtagsString[0]));
+              kafkaProducer.send(new ProducerRecord<>(KafkaProducerConfig.POPULAR_HASHTAG_TOPIC, null, popularHashtagsString[0]));
             });
 
     // Start the computation
